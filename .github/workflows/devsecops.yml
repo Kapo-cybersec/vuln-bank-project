@@ -136,8 +136,8 @@ jobs:
       - name: Run OWASP ZAP Scan
         uses: zaproxy/action-full-scan@v0.5.0
         with:
-          target: "http://localhost:3000"  # Zgodny port aplikacji
-          docker_name: owasp/zap2docker  # Poprawiony obraz
+          target: "http://localhost:5000"
+          docker_name: owasp/zap
       - name: Verify OWASP ZAP Results
         run: |
           if [ -s zap-report.xml ]; then
