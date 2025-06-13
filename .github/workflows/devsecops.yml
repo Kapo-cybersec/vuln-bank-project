@@ -67,7 +67,7 @@ jobs:
         with:
           args: >
             -Dsonar.projectKey=Kapo-cybersec_vuln-bank-project
-            -Dsonar.organization=Kapo-cybersec
+            -Dsonar.organization=kapo-cybersec
             -Dsonar.sources=.
             -Dsonar.python.version=3.9
 
