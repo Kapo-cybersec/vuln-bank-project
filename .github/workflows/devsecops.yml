@@ -1,5 +1,4 @@
 name: DevSecOps Pipeline 279416
-image: docker:latest
 
 on:
   push:
