@@ -138,7 +138,7 @@ jobs:
         run: docker-compose build
 
       # Run app using Docker Compose
-        - name: Run vuln-bank app with Docker Compose
+      - name: Run vuln-bank app with Docker Compose
         run: docker-compose up -d
 
       # Wait for app availability
