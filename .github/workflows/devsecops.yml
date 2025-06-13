@@ -105,7 +105,7 @@ jobs:
         run: mkdir -p security-results/trufflehog
       - name: Run TruffleHog Scan
         run: |
-          trufflehog --json file://$(pwd) > security-results/trufflehog/scan-results.json
+          trufflehog git --json . > security-results/trufflehog/scan-results.json
       - name: Verify TruffleHog Results
         run: |
           if [ -s security-results/trufflehog/scan-results.json ]; then
