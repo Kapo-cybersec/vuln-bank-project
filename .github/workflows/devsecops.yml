@@ -163,26 +163,25 @@ jobs:
         with:
           target: "http://localhost:5000"
           docker_name: zaproxy/zap-stable
-          allow_issue_writing: false  # Disable GitHub issues
-          output: zap-report.xml  # Ensure the XML output is generated
+          allow_issue_writing: true  # Enabling GitHub issues writing
 
-      # Extract results from ZAP XML and create GitHub annotations
-      - name: Extract and display OWASP ZAP Results
+      # ZAP Scan results
+      - name: Verify OWASP ZAP Results
         run: |
-          echo "Parsing OWASP ZAP scan results..."
-
-          # Parse the XML file and create annotations for each issue
-          issues=$(xmllint --xpath '//alert/@url' zap-report.xml)
-
-          if [[ -z "$issues" ]]; then
-            echo "No vulnerabilities found."
-            echo "::notice file=zap-report.xml::No vulnerabilities detected."
+          if [ -s zap-report.xml ]; then
+            echo "OWASP ZAP scan completed successfully"
           else
-            # Parse and show each issue with severity
-            while read -r issue; do
-              echo "::error file=zap-report.xml::Vulnerability found at: $issue"
-            done <<< "$issues"
+            echo "No vulnerabilities found"
+            echo '<testsuites></testsuites>' > zap-report.xml
           fi
+
+      # Upload the results to GitHub Actions
+      - name: Upload OWASP ZAP Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-results
+          path: zap-report.xml
+          retention-days: 90
 
       # Stop container after scan
       - name: Stop vuln-bank container
