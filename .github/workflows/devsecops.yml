@@ -152,7 +152,7 @@ jobs:
       # Wait for app availability
       - name: Wait for vuln-bank to be ready
         run: |
-          until curl -s http://localhost:5000 > /dev/null; do
+          until curl -s http://host.docker.internal:5000 > /dev/null; do
             echo "Waiting for vuln-bank to start..."
             sleep 5
           done
@@ -161,7 +161,7 @@ jobs:
       - name: Run OWASP ZAP Full Scan
         uses: zaproxy/action-full-scan@v0.5.0
         with:
-          target: "http://localhost:5000"
+          target: "http://host.docker.internal:5000"
           docker_name: zaproxy/zap-stable
           allow_issue_writing: true  # Enabling GitHub issues writing
 
