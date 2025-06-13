@@ -101,6 +101,8 @@ jobs:
       - name: Install dependencies
         run: |
           pip install trufflehog
+      - name: Create Results Directory
+        run: mkdir -p security-results/trufflehog
       - name: Run TruffleHog Scan
         run: |
           trufflehog --json file://$(pwd) > security-results/trufflehog/scan-results.json
