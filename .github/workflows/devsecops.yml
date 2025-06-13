@@ -1,1 +1,124 @@
-test
+image: docker:latest
+
+services:
+    - name: docker:18.09.7-dind
+      command: ["--insecure-registry","<YourRegistryAddressHere>"]
+
+stages:
+    - build
+    - test
+    - security
+    - release
+    - deploy-staging
+    - dast
+    - cleanup-staging
+
+variables:
+    DOCKER_HOST: tcp://127.0.0.1:5000
+
+# Stage 1: Build app
+build:
+    stage: build
+    image: python:3.8
+    before_script:
+        - pip3 install --upgrade virtualenv
+    script:
+        - virtualenv env
+        - source env/bin/activate
+        - pip install -r requirements.txt
+        - python manage.py check  # Run basic tests, for example `manage.py check` in Django
+
+# Stage 2: App tests
+test:
+    stage: test
+    image: python:3.8
+    before_script:
+        - pip3 install --upgrade virtualenv
+    script:
+        - virtualenv env
+        - source env/bin/activate
+        - pip install -r requirements.txt
+        - python manage.py test  # Run tests in Django
+
+# Stage 3: SCA (Software Composition Analysis) - Scan libraries
+sca_frontend:
+    stage: security
+    image: node:alpine3.10
+    script:
+        - npm install
+        - npm install -g retire
+        - retire --outputformat json --outputpath retirejs-report.json --severity high
+    artifacts:
+        paths: [retirejs-report.json]
+        when: always
+        expire_in: one week
+
+sca_backend:
+    stage: security
+    image: pyupio/safety
+    script:
+        - safety check -r requirements.txt --json > oast-results.json
+    artifacts:
+        paths: [oast-results.json]
+        when: always
+        expire_in: one week
+    allow_failure: true
+
+# Stage 4: Scan secrets
+secrets-scanning:
+    stage: security
+    script:
+        - apk add git
+        - git checkout master
+        - docker run -v $(pwd):/src hysnsec/trufflehog file:///src --json | tee trufflehog-output.json
+    artifacts:
+        paths: [trufflehog-output.json]
+        when: always
+        expire_in: one week
+    allow_failure: true
+
+# Stage 5: SAST - Static Application Security Testing
+sast:
+    stage: security
+    script:
+        - docker pull hysnsec/bandit
+        - docker run --user $(id -u):$(id -g) -v $(pwd):/src --rm hysnsec/bandit -r /src -f json -o /src/bandit-output.json
+    artifacts:
+        paths: [bandit-output.json]
+        when: always
+    allow_failure: true
+
+# Stage 6: Building Docker image
+release:
+    stage: release
+    before_script:
+        - echo $CI_REGISTRY_PASS | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
+    script:
+        - docker build --network host -t $CI_REGISTRY/library/vuln-bank:latest .
+        - docker push $CI_REGISTRY/library/vuln-bank:latest
+
+# Stage 7: Deploy na staging
+staging:
+    stage: deploy-staging
+    image: alpine/helm:3.2.1
+    script:
+        - helm install staging ./helm --values=./helm/values.yaml --namespace default
+
+# Stage 8: DAST (Dynamic Application Security Testing) - Scan running app
+nmap:
+    stage: dast
+    script:
+        - docker pull hysnsec/nmap
+        - docker run --rm -d -p 3000:3000 -v $(pwd):/tmp $CI_REGISTRY/library/vuln-bank:latest
+        - docker run --rm -v $(pwd):/tmp hysnsec/nmap -Pn http://localhost:3000 -oX /tmp/nmap-output.xml
+    artifacts:
+        paths: [nmap-output.xml]
+        when: always
+
+# Etap 9: Clear staging
+remove-staging:
+    stage: cleanup-staging
+    image: alpine/helm:3.2.1
+    script:
+        - helm uninstall staging --namespace default
+    when: manual
