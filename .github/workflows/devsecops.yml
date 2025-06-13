@@ -138,7 +138,7 @@ jobs:
         with:
           target: "http://host.docker.internal:5000"
           docker_name: zaproxy/zap-stable
-          extra_args: "-s activeScan"
+          allow_issue_writing: true
       - name: Verify OWASP ZAP Results
         run: |
           if [ -s zap-report.xml ]; then
