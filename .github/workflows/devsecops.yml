@@ -130,6 +130,7 @@ jobs:
         image: docker:18.09.7-dind  # Docker-in-Docker service
         options: --privileged
     steps:
+      # Checkout code
       - name: Checkout code
         uses: actions/checkout@v4
 
@@ -156,35 +157,36 @@ jobs:
             sleep 5
           done
 
-      # ZAP Scan
+      # Run OWASP ZAP Full Scan
       - name: Run OWASP ZAP Full Scan
         uses: zaproxy/action-full-scan@v0.5.0
         with:
           target: "http://localhost:5000"
           docker_name: zaproxy/zap-stable
-          allow_issue_writing: true
+          allow_issue_writing: false  # Disable GitHub issues
+          output: zap-report.xml  # Ensure the XML output is generated
 
-      # ZAP Scan results
-      - name: Verify OWASP ZAP Results
+      # Extract results from ZAP XML and create GitHub annotations
+      - name: Extract and display OWASP ZAP Results
         run: |
-          if [ -s zap-report.xml ]; then
-            echo "OWASP ZAP scan completed successfully"
+          echo "Parsing OWASP ZAP scan results..."
+
+          # Parse the XML file and create annotations for each issue
+          issues=$(xmllint --xpath '//alert/@url' zap-report.xml)
+
+          if [[ -z "$issues" ]]; then
+            echo "No vulnerabilities found."
+            echo "::notice file=zap-report.xml::No vulnerabilities detected."
           else
-            echo "No vulnerabilities found"
-            echo '<testsuites></testsuites>' > zap-report.xml
+            # Parse and show each issue with severity
+            while read -r issue; do
+              echo "::error file=zap-report.xml::Vulnerability found at: $issue"
+            done <<< "$issues"
           fi
 
-      # Send ZAP Files as an artifact
-      - name: Upload OWASP ZAP Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: zap-results
-          path: zap-report.xml
-          retention-days: 90
-
-      # Stop container
+      # Stop container after scan
       - name: Stop vuln-bank container
-        run: docker stop vuln-bank
+        run: docker-compose down
 
   # Container Scanning
   container_scan:
