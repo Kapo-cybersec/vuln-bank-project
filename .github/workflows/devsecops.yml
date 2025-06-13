@@ -66,8 +66,8 @@ jobs:
           SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
         with:
           args: >
-            -Dsonar.projectKey=commando-x_vuln-bank #This should be your project key name
-            -Dsonar.organization=commando-x #And your org name too
+            -Dsonar.projectKey=Kapo-cybersec_vuln-bank-project
+            -Dsonar.organization=Kapo-cybersec
             -Dsonar.sources=.
             -Dsonar.python.version=3.9
 
