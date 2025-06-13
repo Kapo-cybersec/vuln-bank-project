@@ -133,14 +133,13 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Build app image
+      # Build app image using Docker Compose
       - name: Build Docker Image for vuln-bank
-        run: docker build -t vuln-bank:latest .
+        run: docker-compose build
 
-      # Run app
-      - name: Run vuln-bank app
-        run: |
-          docker run -d --name vuln-bank -p 5000:5000 vuln-bank:latest
+      # Run app using Docker Compose
+        - name: Run vuln-bank app with Docker Compose
+        run: docker-compose up -d
 
       # Wait for app availability
       - name: Wait for vuln-bank to be ready
