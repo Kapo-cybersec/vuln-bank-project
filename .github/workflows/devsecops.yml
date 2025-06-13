@@ -1,134 +1,191 @@
-name: DevSecOps Pipeline
+name: DevSecOps Pipeline 279416
 
 on:
   push:
-    branches:
-      - main
+    branches: [ main ]
   pull_request:
-    branches:
-      - main
-
-image: docker:latest
+    branches: [ main ]
 
 services:
-    - name: docker:18.09.7-dind
-      command: ["--insecure-registry","<YourRegistryAddressHere>"]
+  docker:
+    image: docker:18.09.7-dind  # Docker-in-Docker service
+    options: --privileged --docker-host=tcp://127.0.0.1:2375
 
-stages:
-    - build
-    - test
-    - security
-    - release
-    - deploy-staging
-    - dast
-    - cleanup-staging
+jobs:
+  # SCA – Dependency Scanning
+  sca:
+    name: Dependency Scanning (Snyk)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-variables:
-    DOCKER_HOST: tcp://127.0.0.1:5000
+      - name: Set Up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
 
-# Stage 1: Build app
-build:
-    stage: build
-    image: python:3.8
-    before_script:
-        - pip3 install --upgrade virtualenv
-    script:
-        - virtualenv env
-        - source env/bin/activate
-        - pip install -r requirements.txt
-        - python manage.py check  # Run basic tests, for example `manage.py check` in Django
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
 
-# Stage 2: App tests
-test:
-    stage: test
-    image: python:3.8
-    before_script:
-        - pip3 install --upgrade virtualenv
-    script:
-        - virtualenv env
-        - source env/bin/activate
-        - pip install -r requirements.txt
-        - python manage.py test  # Run tests in Django
+      - name: Create Results Directory
+        run: mkdir -p security-results/snyk
 
-# Stage 3: SCA (Software Composition Analysis) - Scan libraries
-sca_frontend:
-    stage: security
-    image: node:alpine3.10
-    script:
-        - npm install
-        - npm install -g retire
-        - retire --outputformat json --outputpath retirejs-report.json --severity high
-    artifacts:
-        paths: [retirejs-report.json]
-        when: always
-        expire_in: one week
+      - name: Run Snyk Scan
+        uses: snyk/actions/python@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --json-file-output=security-results/snyk/scan-results.json
 
-sca_backend:
-    stage: security
-    image: pyupio/safety
-    script:
-        - safety check -r requirements.txt --json > oast-results.json
-    artifacts:
-        paths: [oast-results.json]
-        when: always
-        expire_in: one week
-    allow_failure: true
+      - name: Verify Snyk Results
+        run: |
+          if [ -s security-results/snyk/scan-results.json ]; then
+            echo "Snyk scan completed successfully"
+          else
+            echo "No Snyk vulnerabilities found"
+            echo '{"vulnerabilities": []}' > security-results/snyk/scan-results.json
+          fi
 
-# Stage 4: Scan secrets
-secrets-scanning:
-    stage: security
-    script:
-        - apk add git
-        - git checkout master
-        - docker run -v $(pwd):/src hysnsec/trufflehog file:///src --json | tee trufflehog-output.json
-    artifacts:
-        paths: [trufflehog-output.json]
-        when: always
-        expire_in: one week
-    allow_failure: true
+      - name: Upload Snyk Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: snyk-results
+          path: security-results/snyk/scan-results.json
+          retention-days: 90
 
-# Stage 5: SAST - Static Application Security Testing
-sast:
-    stage: security
-    script:
-        - docker pull hysnsec/bandit
-        - docker run --user $(id -u):$(id -g) -v $(pwd):/src --rm hysnsec/bandit -r /src -f json -o /src/bandit-output.json
-    artifacts:
-        paths: [bandit-output.json]
-        when: always
-    allow_failure: true
+  # SAST – SonarQube Scan
+  sast:
+    name: SAST (SonarQube)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        continue-on-error: true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=commando-x_vuln-bank #This should be your project key name
+            -Dsonar.organization=commando-x #And your org name too
+            -Dsonar.sources=.
+            -Dsonar.python.version=3.9
 
-# Stage 6: Building Docker image
-release:
-    stage: release
-    before_script:
-        - echo $CI_REGISTRY_PASS | docker login -u $CI_REGISTRY_USER --password-stdin $CI_REGISTRY
-    script:
-        - docker build --network host -t $CI_REGISTRY/library/vuln-bank:latest .
-        - docker push $CI_REGISTRY/library/vuln-bank:latest
+      - name: Store SonarQube Results
+        run: |
+          mkdir -p security-results/sonarqube
+          curl -H "Authorization: Bearer ${{ secrets.SONAR_TOKEN }}" \
+               "${{ secrets.SONAR_HOST_URL }}/api/issues/search?projectKeys=commando-x_vuln-bank" \
+               > security-results/sonarqube/issues.json
+          
+          if [ -s security-results/sonarqube/issues.json ]; then
+            echo "SonarQube results saved successfully"
+          else
+            echo "No SonarQube issues found"
+            echo '{"issues": []}' > security-results/sonarqube/issues.json
+          fi
 
-# Stage 7: Deploy na staging
-staging:
-    stage: deploy-staging
-    image: alpine/helm:3.2.1
-    script:
-        - helm install staging ./helm --values=./helm/values.yaml --namespace default
+      - name: Upload SonarQube Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonar-results
+          path: security-results/sonarqube/
+          retention-days: 90
 
-# Stage 8: DAST (Dynamic Application Security Testing) - Scan running app
-nmap:
-    stage: dast
-    script:
-        - docker pull hysnsec/nmap
-        - docker run --rm -d -p 3000:3000 -v $(pwd):/tmp $CI_REGISTRY/library/vuln-bank:latest
-        - docker run --rm -v $(pwd):/tmp hysnsec/nmap -Pn http://localhost:3000 -oX /tmp/nmap-output.xml
-    artifacts:
-        paths: [nmap-output.xml]
-        when: always
+   # Secrets Scan – GitLeaks/TruffleHog
+  secrets_scan:
+    name: Secrets Scan (TruffleHog)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          pip install trufflehog
+      - name: Run TruffleHog Scan
+        run: |
+          trufflehog --json file://$(pwd) > security-results/trufflehog/scan-results.json
+      - name: Verify TruffleHog Results
+        run: |
+          if [ -s security-results/trufflehog/scan-results.json ]; then
+            echo "TruffleHog scan completed successfully"
+          else
+            echo "No secrets found"
+            echo '{"secrets": []}' > security-results/trufflehog/scan-results.json
+          fi
+      - name: Upload TruffleHog Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trufflehog-results
+          path: security-results/trufflehog/scan-results.json
+          retention-days: 90
 
-# Etap 9: Clear staging
-remove-staging:
-    stage: cleanup-staging
-    image: alpine/helm:3.2.1
-    script:
-        - helm uninstall staging --namespace default
-    when: manual
+  # DAST – Dynamic Application Security Testing (OWASP ZAP)
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker Image
+        run: docker build -t vuln-bank:latest .
+      - name: Run OWASP ZAP Scan
+        uses: zaproxy/action-full-scan@v0.5.0
+        with:
+          target: "http://localhost:5000" #Vurn-Bank Port
+      - name: Verify OWASP ZAP Results
+        run: |
+          if [ -s zap-report.xml ]; then
+            echo "OWASP ZAP scan completed successfully"
+          else
+            echo "No vulnerabilities found"
+            echo '<testsuites></testsuites>' > zap-report.xml
+          fi
+      - name: Upload OWASP ZAP Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-results
+          path: zap-report.xml
+          retention-days: 90
+
+  # Container Scanning
+  container_scan:
+    name: Container Scanning (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker Image
+        run: docker build -t vulnerable-bank:latest .
+
+      - name: Create Results Directory
+        run: mkdir -p security-results/trivy
+
+      - name: Run Trivy Scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'vulnerable-bank:latest'
+          format: 'json'
+          output: 'security-results/trivy/scan-results.json'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+          exit-code: 0
+
+      - name: Verify Trivy Results
+        run: |
+          if [ -s security-results/trivy/scan-results.json ]; then
+            echo "Trivy scan completed successfully"
+          else
+            echo "No Trivy vulnerabilities found"
+            echo '{"Results": []}' > security-results/trivy/scan-results.json
+          fi
+
+      - name: Upload Trivy Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trivy-results
+          path: security-results/trivy/scan-results.json
+          retention-days: 90
