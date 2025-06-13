@@ -122,56 +122,37 @@ jobs:
           retention-days: 90
 
   # DAST – Dynamic Application Security Testing (OWASP ZAP)
-  name: DAST (OWASP ZAP)
-
-  on:
-    workflow_dispatch:
-
-  jobs:
-    dast:
-      runs-on: ubuntu-latest
-
-      services:
-        docker:
-          image: docker:18.09.7-dind
-          options: --privileged
-
-        vuln-bank:
-          image: vuln-bank:latest
-          ports:
-            - 5000:5000
-
-      steps:
-        - uses: actions/checkout@v4
-
-        - name: Set up Docker Buildx (optional, if building locally)
-          uses: docker/setup-buildx-action@v3
-
-        - name: Build Docker Image (vuln-bank)
-          run: docker build -t vuln-bank:latest .
-
-        - name: Run OWASP ZAP Scan
-          uses: zaproxy/action-full-scan@v0.5.0
-          with:
-            target: "http://vuln-bank:5000"
-            docker_name: zaproxy/zap-stable
-            allow_issue_writing: true
-
-        - name: Verify OWASP ZAP Results
-          run: |
-            if [ -s zap-report.xml ]; then
-              echo "OWASP ZAP scan completed successfully"
-            else
-              echo "No vulnerabilities found"
-              echo "<testsuites></testsuites>" > zap-report.xml
-            fi
-
-        - name: Upload OWASP ZAP Results
-          uses: actions/upload-artifact@v4
-          with:
-            name: zap-results
-            path: zap-report.xml
-            retention-days: 90
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+    services:
+      docker:
+        image: docker:18.09.7-dind  # Docker-in-Docker service
+        options: --privileged
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker Image
+        run: docker build -t vuln-bank:latest .
+      - name: Run OWASP ZAP Scan
+        uses: zaproxy/action-full-scan@v0.5.0
+        with:
+          target: "http://vuln-bank:5000"
+          docker_name: zaproxy/zap-stable
+          allow_issue_writing: true
+      - name: Verify OWASP ZAP Results
+        run: |
+          if [ -s zap-report.xml ]; then
+            echo "OWASP ZAP scan completed successfully"
+          else
+            echo "No vulnerabilities found"
+            echo '<testsuites></testsuites>' > zap-report.xml
+          fi
+      - name: Upload OWASP ZAP Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: zap-results
+          path: zap-report.xml
+          retention-days: 90
 
   # Container Scanning
   container_scan:
