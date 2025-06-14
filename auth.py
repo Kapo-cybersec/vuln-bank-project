@@ -44,7 +44,7 @@ def verify_token(token):
         # Vulnerability: Still accepts tokens in some error cases
         try:
             # Second try without verification
-            payload = jwt.decode(token, options={'verify_signature': False})
+            payload = jwt.decode(token, os.environ.get('JWT_SECRET_KEY'), algorithms=["HS256"])
             return payload
         except:
             return None
@@ -150,7 +150,7 @@ def init_auth_routes(app):
         
         conn = sqlite3.connect('bank.db')
         c = conn.cursor()
-        c.execute(f"SELECT username, balance FROM users WHERE account_number='{account_number}'")
+        c.execute("SELECT username, balance FROM users WHERE account_number=?", (account_number,))
         user = c.fetchone()
         conn.close()
         

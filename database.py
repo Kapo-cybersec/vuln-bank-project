@@ -220,12 +220,13 @@ def init_db():
 
 def execute_query(query, params=None, fetch=True):
     """
-    Execute a database query
-    Vulnerability: This function still allows for SQL injection if called with string formatting
+    Execute a database query safely
     """
     conn = get_connection()
     try:
         with conn.cursor() as cursor:
+            if params is None:
+                raise ValueError("Parameters must be provided!")
             cursor.execute(query, params)
             result = None
             if fetch:
@@ -235,9 +236,8 @@ def execute_query(query, params=None, fetch=True):
                 conn.commit()
             return result
     except Exception as e:
-        # Vulnerability: Error details might be exposed to users
         conn.rollback()
-        raise e
+        raise RuntimeError("Database operation failed")
     finally:
         return_connection(conn)
 
