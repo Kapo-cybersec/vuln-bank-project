@@ -165,28 +165,24 @@ jobs:
 
   # DAST – Dynamic Application Security Testing (OWASP ZAP)
   dast:
-    name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
-    services:
-      docker:
-        image: docker:18.09.7-dind
-        options: --privileged
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install docker-compose
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Install Docker Compose
         run: |
-          curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          chmod +x /usr/local/bin/docker-compose
-          docker-compose --version
+          sudo apt-get update
+          sudo apt-get install docker-compose -y
 
-      - name: Build Docker Image for vuln-bank
-        run: docker-compose build
-
-      - name: Run vuln-bank app with Docker Compose
-        run: docker-compose up -d
-
+      - name: Build and Run vuln-bank
+        run: |
+          docker-compose build
+          docker-compose up -d
+          
       - name: Wait for vuln-bank to be ready
         run: |
           until curl -s http://localhost:5000 > /dev/null; do
@@ -194,22 +190,15 @@ jobs:
             sleep 5
           done
 
-      - name: Run OWASP ZAP Baseline Scan in Named Container
+      - name: Run OWASP ZAP Baseline Scan
         run: |
-          docker run -d --name zap-dast-temp --network=host \
-            zaproxy/zap-stable zap-baseline.py \
-              -t http://localhost:5000 \
-              -J /tmp/zap-report.json \
-              -w /tmp/zap-report.md \
-              -r /tmp/zap-report.html
-          timeout 400 bash -c '
-            while true; do
-              logs=$(docker logs zap-dast-temp 2>&1)
-              if echo "$logs" | grep -q "PASS:"; then exit 0; fi
-              if ! docker ps | grep zap-dast-temp; then exit 0; fi
-              sleep 10
-            done
-          '
+          docker run --name zap-dast-temp --network=host -d zaproxy/zap-stable zap-baseline.py \
+            -t http://localhost:5000 \
+            -J /tmp/zap-report.json \
+            -w /tmp/zap-report.md \
+            -r /tmp/zap-report.html
+          # czekamy aż kontener się wywali lub zakończy (max 400s)
+          timeout 400 bash -c 'while docker ps | grep zap-dast-temp; do sleep 10; done'
 
       - name: Copy ZAP Reports from Container
         if: always()
@@ -219,12 +208,12 @@ jobs:
           docker cp zap-dast-temp:/tmp/zap-report.md zap-wrk/zap-report.md || true
           docker cp zap-dast-temp:/tmp/zap-report.html zap-wrk/zap-report.html || true
 
-      - name: Remove ZAP Container (just in case)
+      - name: Remove ZAP Container
         if: always()
         run: docker rm -f zap-dast-temp || true
 
-      - name: List zap-wrk directory for debug
-        run: ls -al zap-wrk
+      - name: Show ZAP Results (debug)
+        run: ls -la zap-wrk
 
       - name: Add ZAP Markdown Report to GitHub Actions Summary
         if: always()
@@ -243,7 +232,7 @@ jobs:
           name: zap-report
           path: zap-wrk/
 
-      - name: Stop vuln-bank container
+      - name: Stop vuln-bank
         if: always()
         run: docker-compose down
 
