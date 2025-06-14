@@ -130,7 +130,7 @@ jobs:
       docker:
         image: docker:18.09.7-dind  # Docker-in-Docker service
         options: --privileged
-        
+
     steps:
       # Checkout code
       - name: Checkout code
@@ -181,7 +181,7 @@ jobs:
       - name: Upload OWASP ZAP Results
         uses: actions/upload-artifact@v4
         with:
-          name: zap_scan_results
+          name: zapscanresults
           path: zap-report.xml
           retention-days: 90
 
