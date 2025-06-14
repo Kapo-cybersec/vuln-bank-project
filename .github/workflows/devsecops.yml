@@ -171,34 +171,34 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Compose
-        run: |
-          sudo apt-get update
-          sudo apt-get install docker-compose -y
+        run: sudo apt-get update && sudo apt-get install docker-compose -y
 
-      - name: Build and Run vuln-bank (in background)
+      - name: Build and Run vuln-bank in background
         run: |
           docker-compose up -d
-          # Czekamy aż się wystawi HTTP (max 60s)
-          for i in {1..12}; do
+          for i in {1..15}; do
             curl -sf http://localhost:5000 && break
-            echo "Czekam na start aplikacji..."
-            sleep 5
+            echo "Waiting for app to start..."
+            sleep 4
           done
 
       - name: Prepare ZAP output dir
         run: mkdir zap-output
 
-      - name: Run ZAP Baseline (bez detach!)
+      - name: Run ZAP Baseline (GH Actions: use bridge IP)
         run: |
+          # Find Docker bridge IP (usually 172.17.0.1, but let's confirm)
+          export BRIDGE_IP=$(ip -4 addr show docker0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
+          echo "Docker bridge IP: $BRIDGE_IP"
           docker run --rm \
             -v $PWD/zap-output:/zap/wrk \
-            -t zaproxy/zap-stable zap-baseline.py \
-              -t http://host.docker.internal:5000 \
+            zaproxy/zap-stable zap-baseline.py \
+              -t http://$BRIDGE_IP:5000 \
               -r /zap/wrk/report.html \
               -w /zap/wrk/report.md \
               -J /zap/wrk/report.json
 
-      - name: Check reports
+      - name: List reports
         run: ls -l zap-output
 
       - name: Summary + Upload
