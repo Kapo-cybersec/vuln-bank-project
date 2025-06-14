@@ -165,8 +165,8 @@ jobs:
 
   # DAST – Dynamic Application Security Testing (OWASP ZAP)
   dast:
+    name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
@@ -187,7 +187,6 @@ jobs:
 
       - name: Run ZAP Baseline (GH Actions: use bridge IP)
         run: |
-          # Find Docker bridge IP (usually 172.17.0.1, but let's confirm)
           export BRIDGE_IP=$(ip -4 addr show docker0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
           echo "Docker bridge IP: $BRIDGE_IP"
           docker run --rm \
