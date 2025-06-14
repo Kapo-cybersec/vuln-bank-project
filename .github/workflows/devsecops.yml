@@ -165,74 +165,57 @@ jobs:
 
   # DAST – Dynamic Application Security Testing (OWASP ZAP)
   dast:
+    name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Install Docker Compose
+      - name: Set up Docker Compose
         run: |
           sudo apt-get update
           sudo apt-get install docker-compose -y
 
-      - name: Build and Run vuln-bank
+      - name: Build and Run vuln-bank (in background)
         run: |
-          docker-compose build
           docker-compose up -d
-          
-      - name: Wait for vuln-bank to be ready
-        run: |
-          until curl -s http://localhost:5000 > /dev/null; do
-            echo "Waiting for vuln-bank to start..."
+          # Czekamy aż się wystawi HTTP (max 60s)
+          for i in {1..12}; do
+            curl -sf http://localhost:5000 && break
+            echo "Czekam na start aplikacji..."
             sleep 5
           done
 
-      - name: Run OWASP ZAP Baseline Scan
+      - name: Prepare ZAP output dir
+        run: mkdir zap-output
+
+      - name: Run ZAP Baseline (bez detach!)
         run: |
-          docker run --name zap-dast-temp --network=host -d zaproxy/zap-stable zap-baseline.py \
-            -t http://localhost:5000 \
-            -J /tmp/zap-report.json \
-            -w /tmp/zap-report.md \
-            -r /tmp/zap-report.html
-          # czekamy aż kontener się wywali lub zakończy (max 400s)
-          timeout 400 bash -c 'while docker ps | grep zap-dast-temp; do sleep 10; done'
+          docker run --rm \
+            -v $PWD/zap-output:/zap/wrk \
+            -t zaproxy/zap-stable zap-baseline.py \
+              -t http://host.docker.internal:5000 \
+              -r /zap/wrk/report.html \
+              -w /zap/wrk/report.md \
+              -J /zap/wrk/report.json
 
-      - name: Copy ZAP Reports from Container
-        if: always()
-        run: |
-          mkdir -p zap-wrk
-          docker cp zap-dast-temp:/tmp/zap-report.json zap-wrk/zap-report.json || true
-          docker cp zap-dast-temp:/tmp/zap-report.md zap-wrk/zap-report.md || true
-          docker cp zap-dast-temp:/tmp/zap-report.html zap-wrk/zap-report.html || true
+      - name: Check reports
+        run: ls -l zap-output
 
-      - name: Remove ZAP Container
-        if: always()
-        run: docker rm -f zap-dast-temp || true
-
-      - name: Show ZAP Results (debug)
-        run: ls -la zap-wrk
-
-      - name: Add ZAP Markdown Report to GitHub Actions Summary
-        if: always()
+      - name: Summary + Upload
         run: |
           echo "## 🕷️ OWASP ZAP DAST Results" >> $GITHUB_STEP_SUMMARY
-          if [ -s zap-wrk/zap-report.md ]; then
-            cat zap-wrk/zap-report.md >> $GITHUB_STEP_SUMMARY
+          if [ -s zap-output/report.md ]; then
+            cat zap-output/report.md >> $GITHUB_STEP_SUMMARY
           else
             echo "No report generated!" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Upload ZAP Reports as Artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
           name: zap-report
-          path: zap-wrk/
+          path: zap-output/
 
-      - name: Stop vuln-bank
+      - name: Stop and clean
         if: always()
         run: docker-compose down
 
