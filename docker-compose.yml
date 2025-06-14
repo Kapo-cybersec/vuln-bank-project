@@ -3,6 +3,7 @@ version: '3.8'
 services:
   web:
     build: .
+    image: kapo0o/vuln-bank-project_web:latest
     ports:
       - "5000:5000"
     environment:
