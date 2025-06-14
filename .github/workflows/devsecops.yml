@@ -199,12 +199,13 @@ jobs:
       - name: Run OWASP ZAP Baseline Scan (markdown report)
         run: |
           docker run --rm --network=host \
-            -v ${{ github.workspace }}/zap-results:/zap/wrk \
+            -v ${{ github.workspace }}/zap-results:/zap/out \
             zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:5000 \
-            -J zap-report.json \
-            -w zap-report.md \
-            -r zap-report.html \
+            -J /tmp/zap-report.json \
+            -w /tmp/zap-report.md \
+            -r /tmp/zap-report.html \
+            && cp /tmp/zap-report.* /zap/out/ \
             || true
 
       - name: List zap-results directory for debug
