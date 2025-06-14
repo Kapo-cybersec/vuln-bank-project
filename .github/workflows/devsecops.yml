@@ -164,59 +164,46 @@ jobs:
           retention-days: 90
 
   # DAST – Dynamic Application Security Testing (OWASP ZAP)
-  dast:
-    name: DAST (OWASP ZAP)
+  dast_scan:
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      actions: read
+
+    services:
+      docker:
+        image: docker:dind
+        options: --privileged
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Compose
-        run: sudo apt-get update && sudo apt-get install docker-compose -y
+      - name: Set up Docker
+        uses: docker/setup-buildx-action@v3
 
-      - name: Build and Run vuln-bank in background
+      - name: Build vuln-bank image locally
+        run: docker build -t vuln-bank-test-local .
+
+      - name: Start vuln-bank container
+        run: docker run -d -p 5000:5000 --name vuln-bank-test vuln-bank-test-local
+
+      - name: Wait for vuln-bank to be ready
         run: |
-          docker-compose up -d
-          for i in {1..15}; do
+          for i in {1..20}; do
             curl -sf http://localhost:5000 && break
             echo "Waiting for app to start..."
-            sleep 4
+            sleep 5
           done
 
-      - name: Prepare ZAP output dir
-        run: mkdir zap-output
-
-      - name: Run ZAP Baseline (GH Actions: use bridge IP)
-        run: |
-          export BRIDGE_IP=$(ip -4 addr show docker0 | grep -oP '(?<=inet\s)\d+(\.\d+){3}')
-          echo "Docker bridge IP: $BRIDGE_IP"
-          docker run --rm \
-            -v $PWD/zap-output:/zap/wrk \
-            zaproxy/zap-stable zap-baseline.py \
-              -t http://$BRIDGE_IP:5000 \
-              -r /zap/wrk/report.html \
-              -w /zap/wrk/report.md \
-              -J /zap/wrk/report.json
-
-      - name: List reports
-        run: ls -l zap-output
-
-      - name: Summary + Upload
-        run: |
-          echo "## 🕷️ OWASP ZAP DAST Results" >> $GITHUB_STEP_SUMMARY
-          if [ -s zap-output/report.md ]; then
-            cat zap-output/report.md >> $GITHUB_STEP_SUMMARY
-          else
-            echo "No report generated!" >> $GITHUB_STEP_SUMMARY
-          fi
-
-      - uses: actions/upload-artifact@v4
+      - name: Run OWASP ZAP Baseline Scan
+        uses: zaproxy/action-baseline@v0.10.0
         with:
-          name: zap-report
-          path: zap-output/
+          target: "http://localhost:5000/"
+          cmd_options: "-I"
 
-      - name: Stop and clean
-        if: always()
-        run: docker-compose down
+      - name: Stop vuln-bank container
+        run: docker stop vuln-bank-test || true && docker rm vuln-bank-test || true
 
   # Container Scanning (Trivy)
   container_scan:
