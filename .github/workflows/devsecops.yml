@@ -25,6 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: Create Results Directory
+        run: mkdir -p security-results/snyk
+
       - name: Run Snyk Scan
         uses: snyk/actions/python@master
         continue-on-error: true
@@ -33,8 +36,7 @@ jobs:
         with:
           args: --json-file-output=security-results/snyk/scan-results.json
 
-      # --- TU: Generowanie summary do UI ---
-      - name: Parse Snyk Results and Generate Markdown Summary
+      - name: Generate Snyk Markdown Summary
         if: always()
         run: |
           echo "## 🛡️ Snyk Dependency Scan Results" > snyk-summary.md
@@ -42,8 +44,7 @@ jobs:
             VULNS=$(jq '.vulnerabilities | length' security-results/snyk/scan-results.json)
             if [ "$VULNS" -gt 0 ]; then
               echo "**$VULNS vulnerabilities found!**" >> snyk-summary.md
-              jq -r '.vulnerabilities[] | "- *[\(.severity | ascii_upcase)]* \(.title) (\(.id)) in \(.from | join(" > "))"' security-results/snyk/scan-results.json | head -10 >> snyk-summary.md
-              if [ "$VULNS" -gt 10 ]; then echo "...and more! See full report in artifact." >> snyk-summary.md; fi
+              jq -r '.vulnerabilities[] | "- *[\(.severity | ascii_upcase)]* \(.title) (\(.id)) in \(.from | join(" > "))"' security-results/snyk/scan-results.json >> snyk-summary.md
             else
               echo "✅ No vulnerabilities found!" >> snyk-summary.md
             fi
@@ -53,8 +54,7 @@ jobs:
 
       - name: Add Snyk Summary to GitHub Actions Summary
         if: always()
-        run: |
-          cat snyk-summary.md >> $GITHUB_STEP_SUMMARY
+        run: cat snyk-summary.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Snyk Results
         uses: actions/upload-artifact@v4
@@ -62,6 +62,176 @@ jobs:
           name: snyk-results
           path: security-results/snyk/scan-results.json
           retention-days: 90
+
+  # SAST – SonarQube Scan
+  sast:
+    name: SAST (SonarQube)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run SonarQube Scan
+        uses: sonarsource/sonarqube-scan-action@master
+        continue-on-error: true
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
+        with:
+          args: >
+            -Dsonar.projectKey=Kapo-cybersec_vuln-bank-project
+            -Dsonar.organization=kapo-cybersec
+            -Dsonar.sources=.
+            -Dsonar.python.version=3.9
+
+      - name: Create SonarQube Results Directory
+        run: mkdir -p security-results/sonarqube
+
+      - name: Fetch SonarQube Issues JSON
+        run: |
+          curl -s -H "Authorization: Bearer ${{ secrets.SONAR_TOKEN }}" \
+               "${{ secrets.SONAR_HOST_URL }}/api/issues/search?projectKeys=Kapo-cybersec_vuln-bank-project" \
+               > security-results/sonarqube/issues.json
+
+      - name: Generate SonarQube Markdown Summary
+        if: always()
+        run: |
+          echo "## 🔎 SonarQube SAST Results" > sonarqube-summary.md
+          if [ -s security-results/sonarqube/issues.json ]; then
+            ISSUES=$(jq '.issues | length' security-results/sonarqube/issues.json)
+            if [ "$ISSUES" -gt 0 ]; then
+              echo "**$ISSUES issues found!**" >> sonarqube-summary.md
+              jq -r '.issues[] | "- *[\(.severity)]* \(.rule) at \(.component):\(.line) – \(.message | gsub("\n"; " "))"' security-results/sonarqube/issues.json >> sonarqube-summary.md
+            else
+              echo "✅ No issues found!" >> sonarqube-summary.md
+            fi
+          else
+            echo "No results found (scan failed?)." >> sonarqube-summary.md
+          fi
+
+      - name: Add SonarQube Summary to GitHub Actions Summary
+        if: always()
+        run: cat sonarqube-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload SonarQube Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: sonarqube-results
+          path: security-results/sonarqube/issues.json
+          retention-days: 90
+
+  # Secrets Scan – TruffleHog
+  secrets_scan:
+    name: Secrets Scan (TruffleHog)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install TruffleHog
+        run: pip install trufflehog
+
+      - name: Create TruffleHog Results Directory
+        run: mkdir -p security-results/trufflehog
+
+      - name: Run TruffleHog Scan
+        run: |
+          trufflehog git --repo . --json > security-results/trufflehog/scan-results.json
+
+      - name: Generate TruffleHog Markdown Summary
+        if: always()
+        run: |
+          echo "## 🔑 TruffleHog Secrets Scan Results" > trufflehog-summary.md
+          if [ -s security-results/trufflehog/scan-results.json ]; then
+            SECRETS=$(jq '.results | length' security-results/trufflehog/scan-results.json 2>/dev/null || jq '. | length' security-results/trufflehog/scan-results.json)
+            if [ "$SECRETS" -gt 0 ]; then
+              echo "**$SECRETS secrets found!**" >> trufflehog-summary.md
+              jq -r '.results // . | .[] | "- File: \(.SourceMetadata.data.git.file), Reason: \(.Reason)"' security-results/trufflehog/scan-results.json >> trufflehog-summary.md
+            else
+              echo "✅ No secrets found!" >> trufflehog-summary.md
+            fi
+          else
+            echo "No results found (scan failed?)." >> trufflehog-summary.md
+          fi
+
+      - name: Add TruffleHog Summary to GitHub Actions Summary
+        if: always()
+        run: cat trufflehog-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload TruffleHog Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: trufflehog-results
+          path: security-results/trufflehog/scan-results.json
+          retention-days: 90
+
+  # DAST – Dynamic Application Security Testing (OWASP ZAP)
+  dast:
+    name: DAST (OWASP ZAP)
+    runs-on: ubuntu-latest
+
+    services:
+      docker:
+        image: docker:18.09.7-dind
+        options: --privileged
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install docker-compose
+        run: |
+          curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
+          chmod +x /usr/local/bin/docker-compose
+          docker-compose --version
+
+      - name: Build Docker Image for vuln-bank
+        run: docker-compose build
+
+      - name: Run vuln-bank app with Docker Compose
+        run: docker-compose up -d
+
+      - name: Wait for vuln-bank to be ready
+        run: |
+          until curl -s http://localhost:5000 > /dev/null; do
+            echo "Waiting for vuln-bank to start..."
+            sleep 5
+          done
+
+      - name: Run OWASP ZAP Full Scan
+        uses: zaproxy/action-baseline@v0.9.0
+        with:
+          target: "http://localhost:5000"
+          docker_name: zaproxy/zap-stable
+          allow_issue_writing: false  # true jeśli chcesz automatyczne issues
+
+      - name: Parse ZAP Report and Generate Markdown Summary
+        if: always()
+        run: |
+          echo "## 🕷️ OWASP ZAP DAST Results" > zap-summary.md
+          if [ -s zap-report.xml ]; then
+            ALERTS=$(xmllint --xpath 'count(//alertitem)' zap-report.xml 2>/dev/null)
+            if [ "$ALERTS" -gt 0 ]; then
+              echo "**$ALERTS vulnerabilities found!**" >> zap-summary.md
+              xmllint --xpath '//alertitem' zap-report.xml | grep -oP '(?<=<alert>).*?(?=</alert>)' | awk '{print "- " $0}' >> zap-summary.md
+            else
+              echo "✅ No vulnerabilities found!" >> zap-summary.md
+            fi
+          else
+            echo "No results found (scan failed?)." >> zap-summary.md
+          fi
+
+      - name: Add ZAP Summary to GitHub Actions Summary
+        if: always()
+        run: cat zap-summary.md >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload OWASP ZAP Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: zapscanresults
+          path: zap-report.xml
+          retention-days: 90
+
+      - name: Stop vuln-bank container
+        if: always()
+        run: docker-compose down
 
   # Container Scanning (Trivy)
   container_scan:
@@ -73,6 +243,9 @@ jobs:
       - name: Build Docker Image
         run: docker build -t vulnerable-bank:latest .
 
+      - name: Create Trivy Results Directory
+        run: mkdir -p security-results/trivy
+
       - name: Run Trivy Scan
         uses: aquasecurity/trivy-action@master
         with:
@@ -83,7 +256,7 @@ jobs:
           ignore-unfixed: true
           exit-code: 0
 
-      - name: Parse Trivy Results and Generate Markdown Summary
+      - name: Generate Trivy Markdown Summary
         if: always()
         run: |
           echo "## 🐳 Trivy Container Scan Results" > trivy-summary.md
@@ -91,8 +264,7 @@ jobs:
             VULNS=$(jq '[.Results[].Vulnerabilities[]?] | length' security-results/trivy/scan-results.json)
             if [ "$VULNS" -gt 0 ]; then
               echo "**$VULNS vulnerabilities found!**" >> trivy-summary.md
-              jq -r '.Results[].Vulnerabilities[]? | "- [\(.Severity)] \(.VulnerabilityID) in \(.PkgName) (\(.Title))"' security-results/trivy/scan-results.json | head -10 >> trivy-summary.md
-              if [ "$VULNS" -gt 10 ]; then echo "...and more! See full report in artifact." >> trivy-summary.md; fi
+              jq -r '.Results[].Vulnerabilities[]? | "- [\(.Severity)] \(.VulnerabilityID) in \(.PkgName) (\(.Title))"' security-results/trivy/scan-results.json >> trivy-summary.md
             else
               echo "✅ No vulnerabilities found!" >> trivy-summary.md
             fi
@@ -102,8 +274,7 @@ jobs:
 
       - name: Add Trivy Summary to GitHub Actions Summary
         if: always()
-        run: |
-          cat trivy-summary.md >> $GITHUB_STEP_SUMMARY
+        run: cat trivy-summary.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Trivy Results
         uses: actions/upload-artifact@v4
