@@ -171,6 +171,7 @@ jobs:
       docker:
         image: docker:18.09.7-dind
         options: --privileged
+
     steps:
       - uses: actions/checkout@v4
 
@@ -193,23 +194,36 @@ jobs:
             sleep 5
           done
 
-      - name: Create zap-wrk directory
-        run: mkdir -p zap-wrk
-
-      - name: Run OWASP ZAP Baseline Scan (markdown report)
+      # NIE montuj katalogu. Po prostu uruchom kontener ZAP-a z nazwą.
+      - name: Run OWASP ZAP Baseline Scan in Named Container
         run: |
-          docker run --rm --network=host \
-            -v ${{ github.workspace }}/zap-wrk:/zap/wrk \
+          docker run --name zap-dast-temp --rm --network=host \
             zaproxy/zap-stable zap-baseline.py \
-            -t http://localhost:5000 \
-            -J /zap/wrk/zap-report.json \
-            -w /zap/wrk/zap-report.md \
-            -r /zap/wrk/zap-report.html \
-            || true
+              -t http://localhost:5000 \
+              -J /tmp/zap-report.json \
+              -w /tmp/zap-report.md \
+              -r /tmp/zap-report.html \
+              || true
 
+      # Skopiuj raporty z kontenera (przed jego usunięciem – rm --rm czeka aż cp się skończy!)
+      - name: Copy ZAP Reports from Container
+        if: always()
+        run: |
+          mkdir -p zap-wrk
+          docker cp zap-dast-temp:/tmp/zap-report.json zap-wrk/zap-report.json || true
+          docker cp zap-dast-temp:/tmp/zap-report.md zap-wrk/zap-report.md || true
+          docker cp zap-dast-temp:/tmp/zap-report.html zap-wrk/zap-report.html || true
+
+      # Usuń kontener na wszelki wypadek
+      - name: Remove ZAP Container (just in case)
+        if: always()
+        run: docker rm -f zap-dast-temp || true
+
+      # Diagnostyka – powinny być pliki!
       - name: List zap-wrk directory for debug
         run: ls -al zap-wrk
 
+      # Summary w Actions
       - name: Add ZAP Markdown Report to GitHub Actions Summary
         if: always()
         run: |
@@ -220,13 +234,14 @@ jobs:
             echo "No report generated!" >> $GITHUB_STEP_SUMMARY
           fi
 
+      # Artefakty dla pełnych raportów
       - name: Upload ZAP Reports as Artifacts
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
           path: zap-wrk/
-          
+
       - name: Stop vuln-bank container
         if: always()
         run: docker-compose down
