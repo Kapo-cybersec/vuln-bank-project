@@ -165,7 +165,7 @@ jobs:
         with:
           target: "http://localhost:5000"
           docker_name: zaproxy/zap-stable
-          allow_issue_writing: true  # Enabling GitHub issues writing
+          #allow_issue_writing: true  # Enabling GitHub issues writing
 
       # ZAP Scan results
       - name: Verify OWASP ZAP Results
