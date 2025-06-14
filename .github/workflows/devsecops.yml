@@ -167,12 +167,10 @@ jobs:
   dast:
     name: DAST (OWASP ZAP)
     runs-on: ubuntu-latest
-
     services:
       docker:
         image: docker:18.09.7-dind
         options: --privileged
-
     steps:
       - uses: actions/checkout@v4
 
@@ -195,39 +193,34 @@ jobs:
             sleep 5
           done
 
-      - name: Run OWASP ZAP Full Scan
-        uses: zaproxy/action-baseline@v0.9.0
-        with:
-          target: "http://localhost:5000"
-          docker_name: zaproxy/zap-stable
-          allow_issue_writing: false  # true jeśli chcesz automatyczne issues
+      - name: Run OWASP ZAP Baseline Scan (markdown report)
+        run: |
+          docker run --network=host -v $(pwd):/zap/wrk/:rw zaproxy/zap-stable zap-baseline.py \
+            -t http://localhost:5000 \
+            -J zap-report.json \
+            -w zap-report.md \
+            -r zap-report.html \
+            || true
 
-      - name: Parse ZAP Report and Generate Markdown Summary
+      - name: Add ZAP Markdown Report to GitHub Actions Summary
         if: always()
         run: |
-          echo "## 🕷️ OWASP ZAP DAST Results" > zap-summary.md
-          if [ -s zap-report.xml ]; then
-            ALERTS=$(xmllint --xpath 'count(//alertitem)' zap-report.xml 2>/dev/null)
-            if [ "$ALERTS" -gt 0 ]; then
-              echo "**$ALERTS vulnerabilities found!**" >> zap-summary.md
-              xmllint --xpath '//alertitem' zap-report.xml | grep -oP '(?<=<alert>).*?(?=</alert>)' | awk '{print "- " $0}' >> zap-summary.md
-            else
-              echo "✅ No vulnerabilities found!" >> zap-summary.md
-            fi
+          echo "## 🕷️ OWASP ZAP DAST Results" >> $GITHUB_STEP_SUMMARY
+          if [ -s zap-report.md ]; then
+            cat zap-report.md >> $GITHUB_STEP_SUMMARY
           else
-            echo "No results found (scan failed?)." >> zap-summary.md
+            echo "No report generated!" >> $GITHUB_STEP_SUMMARY
           fi
 
-      - name: Add ZAP Summary to GitHub Actions Summary
+      - name: Upload ZAP Reports as Artifacts
         if: always()
-        run: cat zap-summary.md >> $GITHUB_STEP_SUMMARY
-
-      - name: Upload OWASP ZAP Results
         uses: actions/upload-artifact@v4
         with:
-          name: zapscanresults
-          path: zap-report.xml
-          retention-days: 90
+          name: zap-report
+          path: |
+            zap-report.md
+            zap-report.json
+            zap-report.html
 
       - name: Stop vuln-bank container
         if: always()
