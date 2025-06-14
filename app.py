@@ -24,6 +24,12 @@ init_connection_pool()
 
 SWAGGER_URL = '/api/docs'
 API_URL = '/static/openapi.json'
+RESET_PIN_QUERY = "UPDATE users SET reset_pin = %s WHERE username = %s"
+USERNAME_AND_RESET_PIN_QUERY = "SELECT id FROM users WHERE username = %s AND reset_pin = %s"
+PASSWORD_QUERY = "UPDATE users SET password = %s, reset_pin = NULL WHERE username = %s"
+USER_NF = "User not found"
+PASSWORD_RESET_MESS = "Password has been reset successfully"
+RESET_PIN_ERR = "Invalid reset PIN"
 
 swaggerui_blueprint = get_swaggerui_blueprint(
     SWAGGER_URL,
@@ -631,7 +637,7 @@ def forgot_password():
                 
                 # Store the reset PIN in database (in plaintext - CWE-319)
                 execute_query(
-                    "UPDATE users SET reset_pin = %s WHERE username = %s",
+                    RESET_PIN_QUERY,
                     (reset_pin, username),
                     fetch=False
                 )
@@ -651,7 +657,7 @@ def forgot_password():
                 # Vulnerability: Username enumeration
                 return jsonify({
                     'status': 'error',
-                    'message': 'User not found'
+                    'message': USER_NF
                 }), 404
                 
         except Exception as e:
@@ -676,7 +682,7 @@ def reset_password():
             # Vulnerability: No rate limiting on PIN attempts
             # Vulnerability: Timing attack possible in PIN verification
             user = execute_query(
-                "SELECT id FROM users WHERE username = %s AND reset_pin = %s",
+                USERNAME_AND_RESET_PIN_QUERY,
                 (username, reset_pin)
             )
             
@@ -684,20 +690,20 @@ def reset_password():
                 # Vulnerability: No password complexity requirements
                 # Vulnerability: No password history check
                 execute_query(
-                    "UPDATE users SET password = %s, reset_pin = NULL WHERE username = %s",
+                    PASSWORD_QUERY,
                     (new_password, username),
                     fetch=False
                 )
                 
                 return jsonify({
                     'status': 'success',
-                    'message': 'Password has been reset successfully'
+                    'message': PASSWORD_RESET_MESS
                 })
             else:
                 # Vulnerability: Username enumeration possible
                 return jsonify({
                     'status': 'error',
-                    'message': 'Invalid reset PIN'
+                    'message': RESET_PIN_ERR
                 }), 400
                 
         except Exception as e:
@@ -730,7 +736,7 @@ def api_v1_forgot_password():
             
             # Store the reset PIN in database (in plaintext - CWE-319)
             execute_query(
-                "UPDATE users SET reset_pin = %s WHERE username = %s",
+                RESET_PIN_QUERY,
                 (reset_pin, username),
                 fetch=False
             )
@@ -750,7 +756,7 @@ def api_v1_forgot_password():
             # Vulnerability: Username enumeration
             return jsonify({
                 'status': 'error',
-                'message': 'User not found'
+                'message': USER_NF
             }), 404
                 
     except Exception as e:
@@ -779,7 +785,7 @@ def api_v2_forgot_password():
             
             # Store the reset PIN in database (in plaintext - CWE-319)
             execute_query(
-                "UPDATE users SET reset_pin = %s WHERE username = %s",
+                RESET_PIN_QUERY,
                 (reset_pin, username),
                 fetch=False
             )
@@ -798,7 +804,7 @@ def api_v2_forgot_password():
             # Vulnerability: Username enumeration still possible
             return jsonify({
                 'status': 'error',
-                'message': 'User not found'
+                'message': USER_NF
             }), 404
                 
     except Exception as e:
@@ -821,7 +827,7 @@ def api_v1_reset_password():
         # Vulnerability: No rate limiting on PIN attempts
         # Vulnerability: Timing attack possible in PIN verification
         user = execute_query(
-            "SELECT id FROM users WHERE username = %s AND reset_pin = %s",
+            USERNAME_AND_RESET_PIN_QUERY,
             (username, reset_pin)
         )
         
@@ -829,14 +835,14 @@ def api_v1_reset_password():
             # Vulnerability: No password complexity requirements
             # Vulnerability: No password history check
             execute_query(
-                "UPDATE users SET password = %s, reset_pin = NULL WHERE username = %s",
+                PASSWORD_QUERY,
                 (new_password, username),
                 fetch=False
             )
             
             return jsonify({
                 'status': 'success',
-                'message': 'Password has been reset successfully',
+                'message': PASSWORD_RESET_MESS,
                 'debug_info': {  # Additional debug info for v1
                     'timestamp': str(datetime.now()),
                     'username': username,
@@ -848,7 +854,7 @@ def api_v1_reset_password():
             # Vulnerability: Username enumeration possible
             return jsonify({
                 'status': 'error',
-                'message': 'Invalid reset PIN',
+                'message': RESET_PIN_ERR,
                 'debug_info': {  # Additional debug info for v1
                     'timestamp': str(datetime.now()),
                     'username': username,
@@ -878,7 +884,7 @@ def api_v2_reset_password():
         # Vulnerability: No rate limiting on PIN attempts
         # Vulnerability: Timing attack possible in PIN verification
         user = execute_query(
-            "SELECT id FROM users WHERE username = %s AND reset_pin = %s",
+            USERNAME_AND_RESET_PIN_QUERY,
             (username, reset_pin)
         )
         
@@ -886,7 +892,7 @@ def api_v2_reset_password():
             # Vulnerability: No password complexity requirements
             # Vulnerability: No password history check
             execute_query(
-                "UPDATE users SET password = %s, reset_pin = NULL WHERE username = %s",
+                PASSWORD_QUERY,
                 (new_password, username),
                 fetch=False
             )
@@ -894,14 +900,14 @@ def api_v2_reset_password():
             # Fixed: Less excessive data exposure
             return jsonify({
                 'status': 'success',
-                'message': 'Password has been reset successfully'
+                'message': PASSWORD_RESET_MESS
                 # Debug info removed in v2
             })
         else:
             # Vulnerability: Username enumeration still possible
             return jsonify({
                 'status': 'error',
-                'message': 'Invalid reset PIN'
+                'message': RESET_PIN_ERR
                 # Debug info removed in v2
             }), 400
                 

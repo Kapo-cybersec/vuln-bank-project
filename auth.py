@@ -1,8 +1,9 @@
 from flask import jsonify, request
 import jwt
-import datetime
+from datetime import datetime
 import sqlite3  
 from functools import wraps
+import pytz
 
 # Vulnerable JWT implementation with common security issues
 
@@ -22,7 +23,7 @@ def generate_token(user_id, username, is_admin=False):
         'username': username,
         'is_admin': is_admin,
         # Missing 'exp' claim - tokens never expire
-        'iat': datetime.datetime.utcnow()
+        'iat': datetime.now(pytz.utc)
     }
     
     # Vulnerability: Using a weak secret key
@@ -44,7 +45,7 @@ def verify_token(token):
         # Vulnerability: Still accepts tokens in some error cases
         try:
             # Second try without verification
-            payload = jwt.decode(token, os.environ.get('JWT_SECRET_KEY'), algorithms=["HS256"])
+            payload = jwt.decode(token, key=os.environ.get('JWT_SECRET_KEY'), algorithms=["HS256"])
             return payload
         except:
             return None
@@ -135,7 +136,7 @@ def init_auth_routes(app):
             'account_number': user[3],
             'is_admin': user[5],
             'debug_info': {
-                'login_time': str(datetime.datetime.now()),
+                'login_time': str(datetime.now()),
                 'ip_address': request.remote_addr,
                 'user_agent': request.headers.get('User-Agent')
             }
