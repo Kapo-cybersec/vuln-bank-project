@@ -194,18 +194,23 @@ jobs:
             sleep 5
           done
 
-      # NIE montuj katalogu. Po prostu uruchom kontener ZAP-a z nazwą.
       - name: Run OWASP ZAP Baseline Scan in Named Container
         run: |
-          docker run --name zap-dast-temp --rm --network=host \
+          docker run -d --name zap-dast-temp --network=host \
             zaproxy/zap-stable zap-baseline.py \
               -t http://localhost:5000 \
               -J /tmp/zap-report.json \
               -w /tmp/zap-report.md \
-              -r /tmp/zap-report.html \
-              || true
+              -r /tmp/zap-report.html
+          timeout 400 bash -c '
+            while true; do
+              logs=$(docker logs zap-dast-temp 2>&1)
+              if echo "$logs" | grep -q "PASS:"; then exit 0; fi
+              if ! docker ps | grep zap-dast-temp; then exit 0; fi
+              sleep 10
+            done
+          '
 
-      # Skopiuj raporty z kontenera (przed jego usunięciem – rm --rm czeka aż cp się skończy!)
       - name: Copy ZAP Reports from Container
         if: always()
         run: |
@@ -214,16 +219,13 @@ jobs:
           docker cp zap-dast-temp:/tmp/zap-report.md zap-wrk/zap-report.md || true
           docker cp zap-dast-temp:/tmp/zap-report.html zap-wrk/zap-report.html || true
 
-      # Usuń kontener na wszelki wypadek
       - name: Remove ZAP Container (just in case)
         if: always()
         run: docker rm -f zap-dast-temp || true
 
-      # Diagnostyka – powinny być pliki!
       - name: List zap-wrk directory for debug
         run: ls -al zap-wrk
 
-      # Summary w Actions
       - name: Add ZAP Markdown Report to GitHub Actions Summary
         if: always()
         run: |
@@ -234,7 +236,6 @@ jobs:
             echo "No report generated!" >> $GITHUB_STEP_SUMMARY
           fi
 
-      # Artefakty dla pełnych raportów
       - name: Upload ZAP Reports as Artifacts
         if: always()
         uses: actions/upload-artifact@v4
