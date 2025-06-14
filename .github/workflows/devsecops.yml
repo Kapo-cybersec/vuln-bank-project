@@ -193,30 +193,29 @@ jobs:
             sleep 5
           done
 
-      - name: Create zap-results directory
-        run: mkdir -p zap-results
+      - name: Create zap-wrk directory
+        run: mkdir -p zap-wrk
 
       - name: Run OWASP ZAP Baseline Scan (markdown report)
         run: |
           docker run --rm --network=host \
-            -v ${{ github.workspace }}/zap-results:/zap/out \
+            -v ${{ github.workspace }}/zap-wrk:/zap/wrk \
             zaproxy/zap-stable zap-baseline.py \
             -t http://localhost:5000 \
-            -J /tmp/zap-report.json \
-            -w /tmp/zap-report.md \
-            -r /tmp/zap-report.html \
-            && cp /tmp/zap-report.* /zap/out/ \
+            -J /zap/wrk/zap-report.json \
+            -w /zap/wrk/zap-report.md \
+            -r /zap/wrk/zap-report.html \
             || true
 
-      - name: List zap-results directory for debug
-        run: ls -al zap-results
+      - name: List zap-wrk directory for debug
+        run: ls -al zap-wrk
 
       - name: Add ZAP Markdown Report to GitHub Actions Summary
         if: always()
         run: |
           echo "## 🕷️ OWASP ZAP DAST Results" >> $GITHUB_STEP_SUMMARY
-          if [ -s zap-results/zap-report.md ]; then
-            cat zap-results/zap-report.md >> $GITHUB_STEP_SUMMARY
+          if [ -s zap-wrk/zap-report.md ]; then
+            cat zap-wrk/zap-report.md >> $GITHUB_STEP_SUMMARY
           else
             echo "No report generated!" >> $GITHUB_STEP_SUMMARY
           fi
@@ -226,7 +225,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: zap-report
-          path: zap-results/
+          path: zap-wrk/
           
       - name: Stop vuln-bank container
         if: always()
