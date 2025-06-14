@@ -1,4 +1,4 @@
-name: DevSecOps Pipeline 279416
+name: DevSecOps Pipeline
 
 on:
   push:
@@ -7,7 +7,8 @@ on:
     branches: [ main ]
 
 jobs:
-  # SCA – Dependency Scanning
+
+  # SCA – Dependency Scanning (Snyk)
   sca:
     name: Dependency Scanning (Snyk)
     runs-on: ubuntu-latest
@@ -24,9 +25,6 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Create Results Directory
-        run: mkdir -p security-results/snyk
-
       - name: Run Snyk Scan
         uses: snyk/actions/python@master
         continue-on-error: true
@@ -35,14 +33,28 @@ jobs:
         with:
           args: --json-file-output=security-results/snyk/scan-results.json
 
-      - name: Verify Snyk Results
+      # --- TU: Generowanie summary do UI ---
+      - name: Parse Snyk Results and Generate Markdown Summary
+        if: always()
         run: |
+          echo "## 🛡️ Snyk Dependency Scan Results" > snyk-summary.md
           if [ -s security-results/snyk/scan-results.json ]; then
-            echo "Snyk scan completed successfully"
+            VULNS=$(jq '.vulnerabilities | length' security-results/snyk/scan-results.json)
+            if [ "$VULNS" -gt 0 ]; then
+              echo "**$VULNS vulnerabilities found!**" >> snyk-summary.md
+              jq -r '.vulnerabilities[] | "- *[\(.severity | ascii_upcase)]* \(.title) (\(.id)) in \(.from | join(" > "))"' security-results/snyk/scan-results.json | head -10 >> snyk-summary.md
+              if [ "$VULNS" -gt 10 ]; then echo "...and more! See full report in artifact." >> snyk-summary.md; fi
+            else
+              echo "✅ No vulnerabilities found!" >> snyk-summary.md
+            fi
           else
-            echo "No Snyk vulnerabilities found"
-            echo '{"vulnerabilities": []}' > security-results/snyk/scan-results.json
+            echo "No results found (scan failed?)." >> snyk-summary.md
           fi
+
+      - name: Add Snyk Summary to GitHub Actions Summary
+        if: always()
+        run: |
+          cat snyk-summary.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Snyk Results
         uses: actions/upload-artifact@v4
@@ -51,160 +63,15 @@ jobs:
           path: security-results/snyk/scan-results.json
           retention-days: 90
 
-  # SAST – SonarQube Scan
-  sast:
-    name: SAST (SonarQube)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: SonarQube Scan
-        uses: sonarsource/sonarqube-scan-action@master
-        continue-on-error: true
-        env:
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-          SONAR_HOST_URL: ${{ secrets.SONAR_HOST_URL }}
-        with:
-          args: >
-            -Dsonar.projectKey=Kapo-cybersec_vuln-bank-project
-            -Dsonar.organization=kapo-cybersec
-            -Dsonar.sources=.
-            -Dsonar.python.version=3.9
-
-      - name: Store SonarQube Results
-        run: |
-          mkdir -p security-results/sonarqube
-          curl -H "Authorization: Bearer ${{ secrets.SONAR_TOKEN }}" \
-               "${{ secrets.SONAR_HOST_URL }}/api/issues/search?projectKeys=commando-x_vuln-bank" \
-               > security-results/sonarqube/issues.json
-          
-          if [ -s security-results/sonarqube/issues.json ]; then
-            echo "SonarQube results saved successfully"
-          else
-            echo "No SonarQube issues found"
-            echo '{"issues": []}' > security-results/sonarqube/issues.json
-          fi
-
-      - name: Upload SonarQube Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: sonar-results
-          path: security-results/sonarqube/
-          retention-days: 90
-
-   # Secrets Scan – GitLeaks/TruffleHog
-  secrets_scan:
-    name: Secrets Scan (TruffleHog)
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install dependencies
-        run: |
-          pip install trufflehog
-      - name: Create Results Directory
-        run: mkdir -p security-results/trufflehog
-      - name: Run TruffleHog Scan
-        run: |
-          trufflehog git --repo . --json > security-results/trufflehog/scan-results.json
-      - name: Verify TruffleHog Results
-        run: |
-          if [ -s security-results/trufflehog/scan-results.json ]; then
-            echo "TruffleHog scan completed successfully"
-          else
-            echo "No secrets found"
-            echo '{"secrets": []}' > security-results/trufflehog/scan-results.json
-          fi
-      - name: Upload TruffleHog Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: trufflehog-results
-          path: security-results/trufflehog/scan-results.json
-          retention-days: 90
-
-  # DAST – Dynamic Application Security Testing (OWASP ZAP)
-  dast:
-    name: DAST (OWASP ZAP)
-    runs-on: ubuntu-latest
-
-    services:
-      docker:
-        image: docker:18.09.7-dind  # Docker-in-Docker service
-        options: --privileged
-
-    steps:
-      # Checkout code
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      # Install docker-compose
-      - name: Install docker-compose
-        run: |
-          curl -L "https://github.com/docker/compose/releases/download/1.29.2/docker-compose-$(uname -s)-$(uname -m)" -o /usr/local/bin/docker-compose
-          chmod +x /usr/local/bin/docker-compose
-          docker-compose --version  # Verify docker-compose installation
-
-      # Build app image using Docker Compose
-      - name: Build Docker Image for vuln-bank
-        run: docker-compose build
-
-      # Run app using Docker Compose
-      - name: Run vuln-bank app with Docker Compose
-        run: docker-compose up -d
-
-      # Wait for app availability
-      - name: Wait for vuln-bank to be ready
-        run: |
-          until curl -s http://localhost:5000 > /dev/null; do
-            echo "Waiting for vuln-bank to start..."
-            sleep 5
-          done
-
-      # Run OWASP ZAP Full Scan
-      - name: Run OWASP ZAP Full Scan
-        uses: zaproxy/action-baseline@v0.9.0
-        with:
-          target: "http://localhost:5000"
-          docker_name: zaproxy/zap-stable
-          #allow_issue_writing: true  # Enabling GitHub issues writing
-
-      # ZAP Scan results
-      - name: Verify OWASP ZAP Results
-        run: |
-          if [ -s zap-report.xml ]; then
-            echo "OWASP ZAP scan completed successfully"
-          else
-            echo "No vulnerabilities found"
-            echo '<testsuites></testsuites>' > zap-report.xml
-          fi
-
-      # Upload the results to GitHub Actions
-      - name: Upload OWASP ZAP Results
-        uses: actions/upload-artifact@v4
-        with:
-          name: zapscanresults
-          path: zap-report.xml
-          retention-days: 90
-
-      # Stop container after scan
-      - name: Stop vuln-bank container
-        run: docker-compose down
-
-  # Container Scanning
+  # Container Scanning (Trivy)
   container_scan:
     name: Container Scanning (Trivy)
     runs-on: ubuntu-latest
-    services:
-      docker:
-        image: docker:18.09.7-dind  # Docker-in-Docker service
-        options: --privileged
     steps:
       - uses: actions/checkout@v4
 
       - name: Build Docker Image
         run: docker build -t vulnerable-bank:latest .
-
-      - name: Create Results Directory
-        run: mkdir -p security-results/trivy
 
       - name: Run Trivy Scan
         uses: aquasecurity/trivy-action@master
@@ -216,14 +83,27 @@ jobs:
           ignore-unfixed: true
           exit-code: 0
 
-      - name: Verify Trivy Results
+      - name: Parse Trivy Results and Generate Markdown Summary
+        if: always()
         run: |
+          echo "## 🐳 Trivy Container Scan Results" > trivy-summary.md
           if [ -s security-results/trivy/scan-results.json ]; then
-            echo "Trivy scan completed successfully"
+            VULNS=$(jq '[.Results[].Vulnerabilities[]?] | length' security-results/trivy/scan-results.json)
+            if [ "$VULNS" -gt 0 ]; then
+              echo "**$VULNS vulnerabilities found!**" >> trivy-summary.md
+              jq -r '.Results[].Vulnerabilities[]? | "- [\(.Severity)] \(.VulnerabilityID) in \(.PkgName) (\(.Title))"' security-results/trivy/scan-results.json | head -10 >> trivy-summary.md
+              if [ "$VULNS" -gt 10 ]; then echo "...and more! See full report in artifact." >> trivy-summary.md; fi
+            else
+              echo "✅ No vulnerabilities found!" >> trivy-summary.md
+            fi
           else
-            echo "No Trivy vulnerabilities found"
-            echo '{"Results": []}' > security-results/trivy/scan-results.json
+            echo "No results found (scan failed?)." >> trivy-summary.md
           fi
+
+      - name: Add Trivy Summary to GitHub Actions Summary
+        if: always()
+        run: |
+          cat trivy-summary.md >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Trivy Results
         uses: actions/upload-artifact@v4
